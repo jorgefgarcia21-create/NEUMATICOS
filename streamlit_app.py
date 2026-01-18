@@ -2,8 +2,12 @@ import streamlit as st
 
 # Configuración de página
 st.set_page_config(page_title="Gestión de Neumáticos", page_icon="🛞", layout="centered")
+import streamlit as st
 
-# Estilos CSS (Sin tabulaciones para evitar errores de depuración)
+# Configuración de página
+st.set_page_config(page_title="Gestión de Neumáticos", page_icon="🛞", layout="centered")
+
+# Estilos CSS (Sin tabulaciones)
 st.markdown("""
 <style>
 .blue-line { border-top: 3px solid #007BFF; border-radius: 5px; margin: 5px 0px 15px 0px; }
@@ -11,6 +15,7 @@ div.stButton > button:first-child { width: 100%; }
 .res-card { background-color: #f8f9fa; padding: 12px; border-radius: 10px; margin-bottom: 8px; border-left: 5px solid #007BFF; }
 .baja-card { background-color: #fff5f5; padding: 10px; border-radius: 8px; border-left: 5px solid #ff4b4b; margin-bottom: 5px; }
 .stock-card { background-color: #f0f7ff; padding: 10px; border-radius: 8px; border-left: 5px solid #007BFF; margin-bottom: 5px; }
+.header-info { background-color: #e9ecef; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ccc; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -22,6 +27,16 @@ if 'reset_key' not in st.session_state:
 def borrar_todo():
     st.session_state.reset_key += 1
     st.rerun()
+
+# --- Identificación del Vehículo ---
+st.markdown("### 📋 Identificación del Vehículo")
+st.markdown('<div class="blue-line"></div>', unsafe_allow_html=True)
+
+col_id1, col_id2 = st.columns(2)
+with col_id1:
+    num_bus = st.text_input("Número de Bus:", placeholder="Ej: 1024", key=f"bus_{st.session_state.reset_key}")
+with col_id2:
+    ppu_bus = st.text_input("PPU (Patente):", placeholder="Ej: ABCD-12", key=f"ppu_{st.session_state.reset_key}")
 
 # --- Interfaz de Usuario ---
 tipo_bus = st.radio("Tipo de bus:", ('Rígido (6 ruedas)', 'Articulado (10 ruedas)'), key=f"tipo_{st.session_state.reset_key}")
@@ -118,6 +133,16 @@ if ejecutar:
     # --- SALIDA DE DATOS ORDENADA ---
     st.markdown("---")
     
+    # Encabezado del Reporte con ID de Bus
+    st.markdown(f"""
+    <div class="header-info">
+        <h2 style='margin:0;'>✅ REPORTE FINAL</h2>
+        <strong>Bus:</strong> {num_bus if num_bus else 'N/A'} | 
+        <strong>PPU:</strong> {ppu_bus if ppu_bus else 'N/A'} | 
+        <strong>Configuración:</strong> {tipo_bus}
+    </div>
+    """, unsafe_allow_html=True)
+    
     # 1. ANÁLISIS ESTRATÉGICO
     st.info("### 1. Análisis del Sistema")
     for msg in bitacora:
@@ -135,14 +160,14 @@ if ejecutar:
         </div>
         """, unsafe_allow_html=True)
 
-    # 3. BAJAS DETECTADAS (ORDENADAS)
+    # 3. BAJAS DETECTADAS
     if lista_bajas:
         st.error("### 3. Neumáticos de Baja (Retiro)")
         lista_bajas.sort(key=lambda x: x['pos'])
         for b in lista_bajas:
             st.markdown(f"""<div class="baja-card">Posición {b['pos']}: {b['mm']}mm (Desgaste/Daño)</div>""", unsafe_allow_html=True)
 
-    # 4. STOCK DISPONIBLE (ORDENADO)
+    # 4. STOCK DISPONIBLE
     if stock_donante:
         st.warning("### 4. Stock Sobrante (Para Almacén)")
         stock_donante.sort(key=lambda x: x['pos'])
