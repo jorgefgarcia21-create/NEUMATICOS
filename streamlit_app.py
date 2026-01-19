@@ -2,17 +2,16 @@ import streamlit as st
 
 # Configuración de página
 st.set_page_config(page_title="Gestión de Neumáticos", page_icon="🛞", layout="centered")
-import streamlit as st
 
-# Configuración de página
-st.set_page_config(page_title="Gestión de Neumáticos", page_icon="🛞", layout="centered")
-
-# Estilos CSS (Sin tabulaciones)
+# Estilos CSS actualizados con tus nuevos colores
 st.markdown("""
 <style>
 .blue-line { border-top: 3px solid #007BFF; border-radius: 5px; margin: 5px 0px 15px 0px; }
 div.stButton > button:first-child { width: 100%; }
-.res-card { background-color: #f8f9fa; padding: 12px; border-radius: 10px; margin-bottom: 8px; border-left: 5px solid #007BFF; }
+.res-card { padding: 12px; border-radius: 10px; margin-bottom: 8px; border-left: 5px solid #ccc; }
+.card-nuevo { background-color: #e8f5e9; border-left-color: #2e7d32; } /* Verde */
+.card-rotado { background-color: #fffde7; border-left-color: #fbc02d; } /* Amarillo */
+.card-mantiene { background-color: #e3f2fd; border-left-color: #1976d2; } /* Azul */
 .baja-card { background-color: #fff5f5; padding: 10px; border-radius: 8px; border-left: 5px solid #ff4b4b; margin-bottom: 5px; }
 .stock-card { background-color: #f0f7ff; padding: 10px; border-radius: 8px; border-left: 5px solid #007BFF; margin-bottom: 5px; }
 .header-info { background-color: #e9ecef; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ccc; }
@@ -38,7 +37,6 @@ with col_id1:
 with col_id2:
     ppu_bus = st.text_input("PPU (Patente):", placeholder="Ej: ABCD-12", key=f"ppu_{st.session_state.reset_key}")
 
-# --- Interfaz de Usuario ---
 tipo_bus = st.radio("Tipo de bus:", ('Rígido (6 ruedas)', 'Articulado (10 ruedas)'), key=f"tipo_{st.session_state.reset_key}")
 total_pos = 10 if tipo_bus == 'Articulado (10 ruedas)' else 6
 
@@ -68,13 +66,15 @@ with col_del: st.button("🗑️ Borrar Datos", on_click=borrar_todo)
 with col_run: ejecutar = st.button("🚀 Generar Plan", type="primary")
 
 if ejecutar:
-    # Lógica de Negocio (K < G o N < G -> No/Baja)
     G_LIMITE = 4.0   
     MAX_DIF = 4.0    
     VALOR_E1 = 18.0  
     VALOR_E_TRA = 16.0 
+    LIMITE_ROTAR_MAX = 12.0
+    LIMITE_ROTAR_MIN = 5.0
 
     finales = prof_ini.copy()
+    origen_neumatico = ["mantiene"] * total_pos # Para colorear
     stock_donante = [] 
     lista_bajas = []
     bitacora = []
@@ -82,34 +82,45 @@ if ejecutar:
     ejes_indices = [[2,3,4,5]]
     if total_pos == 10: ejes_indices.append([6,7,8,9])
     
+    # Análisis de necesidad en tracción
+    conteo_bajas_traseras = 0
     necesita_intervencion_trasera = False
     for eje in ejes_indices:
+        bajas_en_este_eje = [p for p in eje if est_ini[p] == 'd' or prof_ini[p] <= G_LIMITE]
+        conteo_bajas_traseras += len(bajas_en_este_eje)
         vivos = [prof_ini[p] for p in eje if est_ini[p] == 'o' and prof_ini[p] > G_LIMITE]
-        if len(vivos) < len(eje) or (len(vivos) > 0 and (max(vivos) - min(vivos) > MAX_DIF)):
+        if len(bajas_en_este_eje) > 0 or (len(vivos) > 0 and (max(vivos) - min(vivos) > MAX_DIF)):
             necesita_intervencion_trasera = True
 
-    # Fase Eje 1
-    e1_apto_donar = all(est_ini[p] == 'o' and prof_ini[p] > G_LIMITE for p in [0,1])
-    if necesita_intervencion_trasera and e1_apto_donar:
+    # --- FASE EJE 1 (DIRECCIONAL) ---
+    e1_entre_5_y_12 = all(LIMITE_ROTAR_MIN <= prof_ini[p] <= LIMITE_ROTAR_MAX and est_ini[p] == 'o' for p in [0,1])
+    e1_mayor_12 = all(prof_ini[p] > LIMITE_ROTAR_MAX and est_ini[p] == 'o' for p in [0,1])
+    
+    # Regla: Rotar si están entre 5-12mm O si hay cambio masivo (3 o 4 neumáticos) incluso si son > 12mm
+    debe_rotar_e1 = necesita_intervencion_trasera and (e1_entre_5_y_12 or (e1_mayor_12 and conteo_bajas_traseras >= 3))
+
+    if debe_rotar_e1:
         for p in [0, 1]:
             stock_donante.append({'pos': p+1, 'mm': prof_ini[p]})
             finales[p] = VALOR_E1
-        bitacora.append("Eje 1: Renovado completo para donar neumáticos a tracción.")
-    elif any(prof_ini[p] <= G_LIMITE or est_ini[p] == 'd' for p in [0,1]):
+            origen_neumatico[p] = "nuevo"
+        bitacora.append(f"Eje 1: Rotado a tracción (Rango 5-12mm o cambio masivo de {conteo_bajas_traseras} neumáticos).")
+    else:
         for p in [0, 1]:
-            if est_ini[p] == 'o' and prof_ini[p] > G_LIMITE:
-                stock_donante.append({'pos': p+1, 'mm': prof_ini[p]})
-            else:
+            if prof_ini[p] <= G_LIMITE or est_ini[p] == 'd':
                 lista_bajas.append({'pos': p+1, 'mm': prof_ini[p]})
-            finales[p] = VALOR_E1
-        bitacora.append("Eje 1: Renovado por desgaste o daños detectados.")
+                finales[p] = VALOR_E1
+                origen_neumatico[p] = "nuevo"
+            else:
+                origen_neumatico[p] = "mantiene"
 
-    # Fase Ejes Traseros
+    # --- FASE EJES TRASEROS ---
     for eje in ejes_indices:
         for p in eje:
             if prof_ini[p] <= G_LIMITE or est_ini[p] == 'd':
                 lista_bajas.append({'pos': p+1, 'mm': prof_ini[p]})
                 finales[p] = None
+        
         while True:
             vivos = [finales[p] for p in eje if finales[p] is not None]
             obj = max(vivos) if vivos else VALOR_E_TRA
@@ -118,58 +129,38 @@ if ejecutar:
                 if finales[p] is None or (obj - finales[p] > MAX_DIF):
                     if finales[p] is not None: stock_donante.append({'pos': p+1, 'mm': finales[p]})
                     stock_donante.sort(key=lambda x: abs(x['mm'] - obj))
+                    
                     if stock_donante and abs(stock_donante[0]['mm'] - obj) <= MAX_DIF:
                         item = stock_donante.pop(0)
                         finales[p] = item['mm']
-                        bitacora.append(f"Pos {p+1}: Nivelado con neumático de {item['mm']}mm.")
-                        cambio = True
+                        origen_neumatico[p] = "rotado"
+                        bitacora.append(f"Pos {p+1}: Nivelado con neumático rotado de {item['mm']}mm.")
                     else:
                         finales[p] = VALOR_E_TRA
+                        origen_neumatico[p] = "nuevo"
                         bitacora.append(f"Pos {p+1}: Instalado Recauchado Nuevo (16mm).")
-                        cambio = True
+                    cambio = True
                 if cambio: break
             if not cambio: break
 
-    # --- SALIDA DE DATOS ORDENADA ---
+    # --- SALIDA DE DATOS ---
     st.markdown("---")
+    st.markdown(f"""<div class="header-info"><h2 style='margin:0;'>✅ REPORTE FINAL</h2><strong>Bus:</strong> {num_bus} | <strong>PPU:</strong> {ppu_bus}</div>""", unsafe_allow_html=True)
     
-    # Encabezado del Reporte con ID de Bus
-    st.markdown(f"""
-    <div class="header-info">
-        <h2 style='margin:0;'>✅ REPORTE FINAL</h2>
-        <strong>Bus:</strong> {num_bus if num_bus else 'N/A'} | 
-        <strong>PPU:</strong> {ppu_bus if ppu_bus else 'N/A'} | 
-        <strong>Configuración:</strong> {tipo_bus}
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # 1. ANÁLISIS ESTRATÉGICO
     st.info("### 1. Análisis del Sistema")
-    for msg in bitacora:
-        st.write(f"• {msg}")
+    for msg in bitacora: st.write(f"• {msg}")
 
-    # 2. PLAN DE ACCIÓN (ORDEN 1-10)
     st.success("### 2. Plan de Acción por Posición")
     for i in range(total_pos):
-        es_cambio = finales[i] != prof_ini[i]
-        color = "#e3f2fd" if es_cambio else "#f1f8e9"
+        clase = "card-nuevo" if origen_neumatico[i] == "nuevo" else "card-rotado" if origen_neumatico[i] == "rotado" else "card-mantiene"
         st.markdown(f"""
-        <div class="res-card" style="background-color: {color};">
+        <div class="res-card {clase}">
             <strong>POSICIÓN {i+1}</strong><br>
-            Actual: {prof_ini[i]}mm | Final: <strong>{finales[i]:.1f}mm</strong>
+            Actual: {prof_ini[i]}mm | Final: <strong>{finales[i]:.1f}mm</strong> ({origen_neumatico[i].upper()})
         </div>
         """, unsafe_allow_html=True)
 
-    # 3. BAJAS DETECTADAS
     if lista_bajas:
         st.error("### 3. Neumáticos de Baja (Retiro)")
-        lista_bajas.sort(key=lambda x: x['pos'])
         for b in lista_bajas:
-            st.markdown(f"""<div class="baja-card">Posición {b['pos']}: {b['mm']}mm (Desgaste/Daño)</div>""", unsafe_allow_html=True)
-
-    # 4. STOCK DISPONIBLE
-    if stock_donante:
-        st.warning("### 4. Stock Sobrante (Para Almacén)")
-        stock_donante.sort(key=lambda x: x['pos'])
-        for s in stock_donante:
-            st.markdown(f"""<div class="stock-card">De Posición {s['pos']}: {s['mm']}mm disponible</div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="baja-card">Posición {b['pos']}: {b['mm']}mm (Retirar)</div>""", unsafe_allow_html=True)
