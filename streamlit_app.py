@@ -9,9 +9,9 @@ st.markdown("""
 .blue-line { border-top: 3px solid #007BFF; border-radius: 5px; margin: 5px 0px 15px 0px; }
 div.stButton > button:first-child { width: 100%; }
 .res-card { padding: 12px; border-radius: 10px; margin-bottom: 8px; border-left: 5px solid #ccc; font-size: 14px; }
-.card-nuevo { background-color: #e8f5e9; border-left-color: #2e7d32; } /* Verde */
-.card-rotado { background-color: #fffde7; border-left-color: #fbc02d; } /* Amarillo */
-.card-mantiene { background-color: #e3f2fd; border-left-color: #1976d2; } /* Azul */
+.card-nuevo { background-color: #e8f5e9; border-left-color: #2e7d32; } 
+.card-rotado { background-color: #fffde7; border-left-color: #fbc02d; } 
+.card-mantiene { background-color: #e3f2fd; border-left-color: #1976d2; } 
 .leyenda-box { background-color: #ffffff; padding: 15px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 20px; }
 .header-info { background-color: #e9ecef; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ccc; }
 </style>
@@ -69,7 +69,7 @@ if ejecutar:
     MAX_DIF = 4.0    
     VALOR_E1 = 18.0  
     VALOR_E_TRA = 16.0 
-    LIMITE_ROTAR_MAX = 12.0 # Tu regla: más de 12mm no se rota por costo
+    LIMITE_ROTAR_MAX = 12.0
 
     finales = prof_ini.copy()
     origen_neumatico = ["mantiene"] * total_pos 
@@ -84,42 +84,48 @@ if ejecutar:
     # 1. ANÁLISIS DE NECESIDAD TRASERA
     conteo_bajas_traseras = 0
     necesita_intervencion_trasera = False
-    for i, eje in enumerate(ejes_traseros):
+    for eje in ejes_traseros:
         bajas_eje = [p for p in eje if est_ini[p] == 'd' or prof_ini[p] <= G_LIMITE]
         conteo_bajas_traseras += len(bajas_eje)
         vivos = [prof_ini[p] for p in eje if est_ini[p] == 'o' and prof_ini[p] > G_LIMITE]
         if bajas_eje or (vivos and (max(vivos) - min(vivos) > MAX_DIF)):
             necesita_intervencion_trasera = True
 
-    # 2. FASE EJE 1 (CORREGIDA)
-    # Condición de rotación: AMBOS deben estar entre 5 y 12mm para rotar el eje completo.
-    e1_apto_rango = all(G_LIMITE < prof_ini[p] <= LIMITE_ROTAR_MAX and est_ini[p] == 'o' for p in [0,1])
-    # Excepción: Rotar incluso > 12mm si hay un cambio masivo atrás (3+)
-    emergencia_trasera = conteo_bajas_traseras >= 3
-
-    if necesita_intervencion_trasera and (e1_apto_rango or emergencia_trasera):
+    # 2. FASE EJE 1 (CORRECCIÓN ESTRICTA 4MM)
+    # Detectar si alguna posición del Eje 1 debe salir por DAÑO o < 4mm
+    e1_debe_salir = [p for p in [0,1] if est_ini[p] == 'd' or prof_ini[p] <= G_LIMITE]
+    
+    # Caso A: Ambos están entre 5 y 12mm -> Rotación completa por eficiencia
+    e1_ambos_apto_rango = all(G_LIMITE < prof_ini[p] <= LIMITE_ROTAR_MAX and est_ini[p] == 'o' for p in [0,1])
+    
+    if (necesita_intervencion_trasera and e1_ambos_apto_rango) or conteo_bajas_traseras >= 3:
         for p in [0, 1]:
             stock_donante.append({'pos': p+1, 'mm': prof_ini[p]})
             finales[p] = VALOR_E1
             origen_neumatico[p] = "nuevo"
-        bitacora_detallada.append("✅ **Eje 1:** Rotación completa por eficiencia (rango 5-12mm) o emergencia trasera.")
-    else:
-        # Si NO se rota el eje completo, evaluamos cada posición individualmente
+        bitacora_detallada.append("✅ **Eje 1:** Rotación completa por eficiencia o emergencia trasera.")
+    
+    elif e1_debe_salir:
+        # Si uno sale, evaluamos si el otro puede quedarse por diferencia de 4mm
         for p in [0, 1]:
-            if prof_ini[p] <= G_LIMITE or est_ini[p] == 'd':
+            if p in e1_debe_salir:
                 lista_bajas.append({'pos': p+1, 'mm': prof_ini[p]})
                 finales[p] = VALOR_E1
                 origen_neumatico[p] = "nuevo"
-                bitacora_detallada.append(f"⚠️ **Pos {p+1}:** Renovado individualmente. Se monta nuevo de 18mm.")
             else:
-                # Verificar si el que queda cumple los 4mm con el nuevo que podría entrar al lado
-                otro = 1 if p == 0 else 0
-                if prof_ini[otro] <= G_LIMITE or est_ini[otro] == 'd':
-                    if abs(VALOR_E1 - prof_ini[p]) > MAX_DIF:
-                        # Si al poner un 18mm la diferencia es > 4mm, se debe renovar el eje completo
-                        # Pero en tu caso (18-14 = 4), se mantiene.
-                        pass
-                bitacora_detallada.append(f"ℹ️ **Pos {p+1}:** Se mantiene ({prof_ini[p]}mm). Eficiencia económica por valor > 12mm.")
+                # ¿El que se queda cumple los 4mm con el nuevo de 18mm?
+                if abs(VALOR_E1 - prof_ini[p]) > MAX_DIF:
+                    # NO CUMPLE (ej: 18 - 11 = 7). Se va a stock para tracción.
+                    stock_donante.append({'pos': p+1, 'mm': prof_ini[p]})
+                    finales[p] = VALOR_E1
+                    origen_neumatico[p] = "nuevo"
+                    bitacora_detallada.append(f"🔄 **Pos {p+1}:** Se retira de dirección por diferencia > 4mm con el nuevo. Pasa a stock.")
+                else:
+                    # SI CUMPLE (ej: 18 - 14 = 4). Se mantiene.
+                    origen_neumatico[p] = "mantiene"
+                    bitacora_detallada.append(f"ℹ️ **Pos {p+1}:** Se mantiene. Cumple diferencia ≤ 4mm.")
+    else:
+        bitacora_detallada.append("ℹ️ **Eje 1:** Sin cambios. Medidas óptimas y diferencia bajo norma.")
 
     # 3. FASE TRASERA (HOMOLOGACIÓN)
     for eje in ejes_traseros:
@@ -150,7 +156,7 @@ if ejecutar:
                 if cambio: break
             if not cambio: break
 
-    # --- SALIDA ---
+    # --- REPORTE ---
     st.markdown("---")
     st.markdown(f"""<div class="header-info"><h2 style='margin:0;'>✅ REPORTE TÉCNICO FINAL</h2><strong>Bus:</strong> {num_bus} | <strong>PPU:</strong> {ppu_bus}</div>""", unsafe_allow_html=True)
     
@@ -161,7 +167,7 @@ if ejecutar:
     st.markdown("""<div class="leyenda-box">
         <div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: #fbc02d; margin-right: 10px; border-radius: 3px;"></div><span><b>Amarillo:</b> Rotado (Diferencia ≤ 4mm).</span></div>
         <div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: #2e7d32; margin-right: 10px; border-radius: 3px;"></div><span><b>Verde:</b> Nuevo (18mm o 16mm).</span></div>
-        <div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: #1976d2; margin-right: 10px; border-radius: 3px;"></div><span><b>Azul:</b> Mantiene posición.</span></div>
+        <div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: #1976d2; margin-right: 10px; border-radius: 3px;"></div><span><b>Azul:</b> Mantiene posición original.</span></div>
     </div>""", unsafe_allow_html=True)
 
     st.success("### 🛠️ Configuración Final del Bus")
@@ -177,5 +183,5 @@ if ejecutar:
             for b in lista_bajas: st.write(f"• Pos {b['pos']} ({b['mm']}mm)")
     with col_inf2:
         if stock_donante:
-            st.warning("### 📦 Stock para Almacén")
+            st.warning("### 📦 Stock para Almacén / Tracción")
             for s in stock_donante: st.write(f"• De Pos {s['pos']} ({s['mm']}mm)")
