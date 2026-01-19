@@ -76,6 +76,7 @@ if ejecutar:
 
     finales = prof_ini.copy()
     origen_neumatico = ["mantiene"] * total_pos 
+    posicion_origen = [None] * total_pos # Para rastrear de dónde viene
     stock_donante = [] 
     lista_bajas = []
     bitacora_detallada = []
@@ -83,7 +84,7 @@ if ejecutar:
     ejes_traseros = [[2,3,4,5]]
     if total_pos == 10: ejes_traseros.append([6,7,8,9])
     
-    # 1. ANÁLISIS DE NECESIDAD TRASERA Y DIFERENCIAS
+    # 1. ANÁLISIS DE NECESIDAD TRASERA
     conteo_bajas_traseras = 0
     necesita_intervencion_trasera = False
     for i, eje in enumerate(ejes_traseros):
@@ -92,14 +93,12 @@ if ejecutar:
         vivos = [prof_ini[p] for p in eje if est_ini[p] == 'o' and prof_ini[p] > G_LIMITE]
         if bajas_eje or (vivos and (max(vivos) - min(vivos) > MAX_DIF)):
             necesita_intervencion_trasera = True
-            bitacora_detallada.append(f"🔍 **Eje {i+2}:** Requiere intervención por desgaste o diferencia > 4mm.")
 
-    # 2. FASE EJE 1 (DIRECCIONAL)
+    # 2. FASE EJE 1
     dif_e1 = abs(prof_ini[0] - prof_ini[1])
     e1_dañado = any(est_ini[p] == 'd' or prof_ini[p] <= G_LIMITE for p in [0,1])
     e1_apto_rango = all(LIMITE_ROTAR_MIN <= prof_ini[p] <= LIMITE_ROTAR_MAX and est_ini[p] == 'o' for p in [0,1])
     
-    # Rotar si hay necesidad Y (está en rango O hay emergencia de 3+ bajas traseras O diferencia > 4mm)
     debe_rotar_e1 = necesita_intervencion_trasera and (e1_apto_rango or conteo_bajas_traseras >= 3 or dif_e1 > MAX_DIF)
 
     if debe_rotar_e1 or e1_dañado:
@@ -110,13 +109,12 @@ if ejecutar:
                 lista_bajas.append({'pos': p+1, 'mm': prof_ini[p]})
             finales[p] = VALOR_E1
             origen_neumatico[p] = "nuevo"
-        bitacora_detallada.append("✅ **Eje 1:** Renovado completo para homologar y/o donar stock a tracción.")
+        bitacora_detallada.append("✅ **Eje 1:** Renovado completo para mantener diferencia ≤ 4mm y donar stock.")
     else:
-        bitacora_detallada.append("ℹ️ **Eje 1:** Se mantiene. Diferencia ≤ 4mm y medida eficiente (> 12mm).")
+        bitacora_detallada.append("ℹ️ **Eje 1:** Se mantiene. Medida eficiente (> 12mm) y diferencia bajo norma.")
 
-    # 3. FASE EJES TRASEROS (HOMOLOGACIÓN ESTRICTA)
+    # 3. FASE TRASERA (CON RASTREO DE ORIGEN)
     for eje in ejes_traseros:
-        # Marcar bajas
         for p in eje:
             if prof_ini[p] <= G_LIMITE or est_ini[p] == 'd':
                 lista_bajas.append({'pos': p+1, 'mm': prof_ini[p]})
@@ -127,17 +125,16 @@ if ejecutar:
             obj = max(vivos) if vivos else VALOR_E_TRA
             cambio = False
             for p in eje:
-                # Si falta neumático o la diferencia con el mayor del eje es > 4mm
                 if finales[p] is None or (obj - finales[p] > MAX_DIF):
                     if finales[p] is not None: stock_donante.append({'pos': p+1, 'mm': finales[p]})
-                    
-                    # Buscar en stock el que mejor homologue (diferencia <= 4mm)
                     stock_donante.sort(key=lambda x: abs(x['mm'] - obj))
+                    
                     if stock_donante and abs(stock_donante[0]['mm'] - obj) <= MAX_DIF:
                         item = stock_donante.pop(0)
                         finales[p] = item['mm']
                         origen_neumatico[p] = "rotado"
-                        bitacora_detallada.append(f"🔄 **Pos {p+1}:** Homologado con {item['mm']}mm (Diferencia ≤ 4mm).")
+                        posicion_origen[p] = item['pos'] # GUARDAMOS LA POSICIÓN ORIGINAL
+                        bitacora_detallada.append(f"🔄 **Pos {p+1}:** Recibe neumático de Pos {item['pos']} ({item['mm']}mm).")
                     else:
                         finales[p] = VALOR_E_TRA
                         origen_neumatico[p] = "nuevo"
@@ -146,42 +143,40 @@ if ejecutar:
                 if cambio: break
             if not cambio: break
 
-    # --- SALIDA DE DATOS ---
+    # --- REPORTE ---
     st.markdown("---")
     st.markdown(f"""<div class="header-info"><h2 style='margin:0;'>✅ REPORTE TÉCNICO FINAL</h2><strong>Bus:</strong> {num_bus} | <strong>PPU:</strong> {ppu_bus}</div>""", unsafe_allow_html=True)
     
-    with st.expander("🔍 ANÁLISIS ESTRATÉGICO Y CAMBIOS", expanded=True):
+    with st.expander("🔍 ANÁLISIS ESTRATÉGICO", expanded=True):
         for msg in bitacora_detallada: st.write(msg)
 
     st.markdown("### 🗺️ Guía de Colores")
     st.markdown("""
     <div class="leyenda-box">
-        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-            <div style="width: 20px; height: 20px; background-color: #fbc02d; margin-right: 10px; border-radius: 3px;"></div>
-            <span><b>Amarillo (Rotado):</b> Neumáticos que vienen del Eje 1 e ingresan a tracción.</span>
-        </div>
-        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-            <div style="width: 20px; height: 20px; background-color: #2e7d32; margin-right: 10px; border-radius: 3px;"></div>
-            <span><b>Verde (Nuevo):</b> Nuevos 18mm (Eje 1) o Recauchados 16mm (Tracción).</span>
-        </div>
-        <div style="display: flex; align-items: center;">
-            <div style="width: 20px; height: 20px; background-color: #1976d2; margin-right: 10px; border-radius: 3px;"></div>
-            <span><b>Azul (Mantiene):</b> Neumáticos que NO se movieron de su lugar.</span>
-        </div>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: #fbc02d; margin-right: 10px; border-radius: 3px;"></div><span><b>Amarillo (Rotado):</b> Neumáticos movidos de otra posición (Diferencia ≤ 4mm).</span></div>
+        <div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: #2e7d32; margin-right: 10px; border-radius: 3px;"></div><span><b>Verde (Nuevo):</b> Dirección 18mm / Recauchado 16mm.</span></div>
+        <div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: #1976d2; margin-right: 10px; border-radius: 3px;"></div><span><b>Azul (Mantiene):</b> Sin cambios de posición.</span></div>
     </div>
     """, unsafe_allow_html=True)
 
     st.success("### 🛠️ Configuración Final del Bus")
     for i in range(total_pos):
         clase = "card-nuevo" if origen_neumatico[i] == "nuevo" else "card-rotado" if origen_neumatico[i] == "rotado" else "card-mantiene"
-        st.markdown(f"""<div class="res-card {clase}"><strong>POSICIÓN {i+1}</strong><br>Anterior: {prof_ini[i]}mm → Final: <b>{finales[i]:.1f}mm</b></div>""", unsafe_allow_html=True)
+        texto_origen = f" (Viene de Pos {posicion_origen[i]})" if posicion_origen[i] else ""
+        
+        st.markdown(f"""
+        <div class="res-card {clase}">
+            <strong>POSICIÓN {i+1}</strong><br>
+            Medida Actual: <b>{finales[i]:.1f}mm</b> {texto_origen}
+        </div>
+        """, unsafe_allow_html=True)
 
     col_inf1, col_inf2 = st.columns(2)
     with col_inf1:
         if lista_bajas:
-            st.error("### ❌ Neumáticos de Baja")
+            st.error("### ❌ Retiros (Bajas)")
             for b in lista_bajas: st.write(f"• Pos {b['pos']} ({b['mm']}mm)")
     with col_inf2:
         if stock_donante:
             st.warning("### 📦 Stock para Almacén")
-            for s in stock_donante: st.write(f"• Neumático de {s['mm']}mm (Ex-Pos {s['pos']})")
+            for s in stock_donante: st.write(f"• De Pos {s['pos']} ({s['mm']}mm)")
